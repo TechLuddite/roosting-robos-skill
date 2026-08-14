@@ -2,3 +2,7 @@
 .claude/
 .vs/
 __pycache__/
+
+# Build output — the .skill is a release asset, not a tracked file
+dist/
+*.skill

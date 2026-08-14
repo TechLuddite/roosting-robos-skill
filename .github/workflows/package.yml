@@ -1,0 +1,72 @@
+name: package
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Fails the build if a manifest carrying real values or secret-shaped
+      # strings ever gets committed. The shipped starter is UNCONFIGURED, which
+      # the validator reports as an error by design, so only the secret and
+      # schema findings are treated as fatal here.
+      - name: Check the committed manifest for leaked values
+        run: |
+          out=$(python skills/rewst/scripts/validate_manifest.py \
+            skills/rewst/references/tenant-manifest.json || true)
+          echo "$out"
+          if echo "$out" | grep -qE "possible secret value|carries a '(value|default)' field"; then
+            echo "::error::committed manifest contains values or secrets"
+            exit 1
+          fi
+
+      - name: Package the skill
+        run: python scripts/package.py skills/rewst dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rewst-skill
+          path: dist/rewst.skill
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Package the skill
+        run: python scripts/package.py skills/rewst dist
+
+      # Creates the release if the tag was pushed before one existed, otherwise
+      # attaches to the release that's already there.
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" dist/rewst.skill --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" dist/rewst.skill \
+              --title "${GITHUB_REF_NAME}" --generate-notes
+          fi
