@@ -1,0 +1,14 @@
+{
+  "name": "roosting-robos",
+  "displayName": "Roosting Robos",
+  "version": "0.1.0",
+  "description": "Build, debug, and review Rewst MSP automations over the Rewst MCP server, with multi-tenant write guardrails and a cached tenant manifest",
+  "author": {
+    "name": "TechLuddite",
+    "url": "https://github.com/TechLuddite"
+  },
+  "homepage": "https://github.com/TechLuddite/roosting-robos-skill",
+  "repository": "https://github.com/TechLuddite/roosting-robos-skill",
+  "license": "MIT",
+  "keywords": ["rewst", "msp", "automation", "jinja", "mcp"]
+}

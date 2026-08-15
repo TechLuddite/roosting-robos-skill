@@ -1,0 +1,18 @@
+{
+  "name": "techluddite-skills",
+  "owner": {
+    "name": "TechLuddite",
+    "url": "https://github.com/TechLuddite"
+  },
+  "metadata": {
+    "description": "TechLuddite community skills",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "roosting-robos",
+      "description": "Build, debug, and review Rewst MSP automations over the Rewst MCP server, with multi-tenant write guardrails and a cached tenant manifest",
+      "source": "./"
+    }
+  ]
+}
