@@ -4,8 +4,11 @@
 Usage:
     python validate_manifest.py references/tenant-manifest.json
     python validate_manifest.py references/tenant-manifest.json --ttl 7
+    python validate_manifest.py references/tenant-manifest.json --allow-unconfigured
 
 Exit codes: 0 = clean, 1 = warnings, 2 = errors (including validator crashes).
+--allow-unconfigured downgrades the shipped UNCONFIGURED starter's error to a
+warning, so CI can gate on the exit code while still packaging the starter.
 """
 
 import argparse
@@ -28,8 +31,8 @@ SECRET_KEY_PATTERN = re.compile(
 # String values that look like credentials regardless of what key they sit under.
 # Kept to well-known prefixes on purpose: generic entropy checks would flag the
 # UUIDs a manifest is made of.
-SECRET_VALUE_PATTERN = re.compile(
-    r"^(eyJ[A-Za-z0-9_-]{10,}"          # JWT
+_SECRET_VALUE = (
+    r"(eyJ[A-Za-z0-9_-]{10,}"           # JWT
     r"|sk-[A-Za-z0-9_-]{8,}"            # sk- API keys
     r"|(ghp|gho|ghu|ghs)_[A-Za-z0-9]{8,}"  # GitHub tokens
     r"|github_pat_[A-Za-z0-9_]{8,}"
@@ -37,6 +40,10 @@ SECRET_VALUE_PATTERN = re.compile(
     r"|AKIA[0-9A-Z]{16}"                # AWS access key id
     r"|-----BEGIN\s)"                   # PEM material
 )
+SECRET_VALUE_PATTERN = re.compile(r"^" + _SECRET_VALUE)
+# For scanning raw text when the manifest won't parse: the secret check must
+# not be skippable by a syntax error.
+SECRET_VALUE_ANYWHERE = re.compile(_SECRET_VALUE)
 
 # Keys that must not exist at all inside org_variables entries: the schema
 # stores names and types, never values or defaults.
@@ -69,13 +76,27 @@ def age_days(ts, now):
     return (now - ts).total_seconds() / 86400.0
 
 
+def raw_secret_scan(path):
+    """Fallback for unparseable manifests: report secret-shaped lines anyway."""
+    try:
+        with open(path, encoding="utf-8-sig", errors="replace") as fh:
+            for n, line in enumerate(fh, 1):
+                if SECRET_VALUE_ANYWHERE.search(line):
+                    print(f"ERROR: possible secret value at line {n} — "
+                          "manifests hold names, not values")
+    except OSError:
+        pass
+
+
 def walk_for_secrets(node, path, findings):
     """Flag secret-named keys with values, and secret-shaped values under any key."""
     if isinstance(node, dict):
         for key, val in node.items():
             here = f"{path}.{key}" if path else key
+            # bool is excluded: an `is_secret: true` flag is names-and-types
+            # metadata, not a leaked value.
             if (SECRET_KEY_PATTERN.search(key) and isinstance(val, (str, int, float))
-                    and str(val).strip()):
+                    and not isinstance(val, bool) and str(val).strip()):
                 findings.append(here)
             elif isinstance(val, str) and SECRET_VALUE_PATTERN.match(val.strip()):
                 findings.append(here)
@@ -97,21 +118,28 @@ def main():
     ap.add_argument("path")
     ap.add_argument("--ttl", type=int, default=None,
                     help="Override ttl_days from the manifest.")
+    ap.add_argument("--allow-unconfigured", action="store_true",
+                    help="Report the UNCONFIGURED starter as a warning instead of "
+                         "an error (CI validates the shipped starter this way).")
     args = ap.parse_args()
 
     errors, warnings = [], []
 
     try:
-        with open(args.path, encoding="utf-8") as fh:
+        # utf-8-sig decodes plain UTF-8 identically and tolerates the BOM some
+        # Windows editors prepend.
+        with open(args.path, encoding="utf-8-sig") as fh:
             m = json.load(fh)
     except FileNotFoundError:
         print(f"ERROR: no manifest at {args.path}")
         return 2
     except UnicodeDecodeError as exc:
         print(f"ERROR: manifest is not valid UTF-8 — {exc}")
+        raw_secret_scan(args.path)
         return 2
     except json.JSONDecodeError as exc:
         print(f"ERROR: invalid JSON — {exc}")
+        raw_secret_scan(args.path)
         return 2
 
     if not isinstance(m, dict):
@@ -123,10 +151,9 @@ def main():
             errors.append(f"missing required top-level key: {key}")
 
     if m.get("tenant") == "UNCONFIGURED":
-        errors.append(
-            "tenant is UNCONFIGURED — this is the empty starter; run the refresh "
-            "procedure in references/manifest.md before relying on it"
-        )
+        msg = ("tenant is UNCONFIGURED — this is the empty starter; run the refresh "
+               "procedure in references/manifest.md before relying on it")
+        (warnings if args.allow_unconfigured else errors).append(msg)
 
     gen_value = m.get("platform_generation")
     if gen_value is not None and gen_value not in GENERATION_VALUES:

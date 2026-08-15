@@ -1,6 +1,7 @@
 ---
 name: rewst
-description: Build, edit, debug and review Rewst automations (workflows, forms, apps, Crates, org variables, Jinja, integrations) via the Rewst MCP server. Use this skill whenever the user mentions Rewst, Crates, RoboRewsty, org variables, or Rewst workflows/forms; asks to build, fix, or inspect anything in their Rewst tenant; mentions Jinja in an MSP automation context; or reports MSP automation symptoms even without naming Rewst — an onboarding/offboarding workflow that broke or misfired, a workflow that ran but did nothing, empty form options, blank CTX variables, misrouted PSA tickets. Enforces multi-tenant write guardrails and house build conventions.
+description: Builds, edits, debugs and reviews Rewst automations (workflows, forms, apps, Crates, org variables, Jinja, integrations) via the Rewst MCP server. Use this skill whenever the user mentions Rewst, Crates, RoboRewsty, org variables, or Rewst workflows/forms; asks to build, fix, or inspect anything in their Rewst tenant; mentions Jinja in an MSP automation context; or reports MSP automation symptoms even without naming Rewst — an onboarding/offboarding workflow that broke or misfired, a workflow that ran but did nothing, empty form options, blank CTX variables, misrouted PSA tickets. Enforces multi-tenant write guardrails and house build conventions.
+license: MIT
 ---
 
 # Rewst
@@ -91,10 +92,10 @@ When the user corrects a name, structure, or pattern, ask once: "general rule, o
 general, offer the exact wording to add to `references/house-style.md` — never edit it silently.
 `[SET THIS]` markers are unmade decisions; ask when one blocks a build, since a concrete case is
 the cheapest moment to get an answer. If the user corrects the same class of thing twice across
-sessions, the first correction failed to land — fix the file, not just the build. On claude.ai
-the skill's copy of `house-style.md` isn't writable across sessions: put the exact wording in
-front of the user to add to their copy (or the shared doc store), and never claim the file was
-updated when it wasn't.
+sessions, the first correction failed to land — fix the file, not just the build. On claude.ai —
+and on plugin-marketplace installs, where a plugin update replaces the skill directory — the
+skill's copy of `house-style.md` isn't durable: put the exact wording in front of the user to
+add to their copy (or the shared doc store), and never claim the file was updated when it wasn't.
 
 ## Hard rules (always active)
 
@@ -123,5 +124,7 @@ once if the user runs high-risk work on a broad token.
 | `references/tenant-manifest.json` | The cached tenant constants themselves | generated |
 
 `house-style.md` and `tenant-manifest.json` must survive skill updates; everything skill-owned
-can be regenerated. `scripts/validate_manifest.py <path>` checks manifest shape and staleness
-after a refresh.
+can be regenerated. Surviving takes a mechanism: on a manual git install, carry the two files
+forward; on a plugin-marketplace install the update replaces the skill directory wholesale, so
+keep the live copies outside it (see `references/manifest.md`, "Where the manifest lives").
+`scripts/validate_manifest.py <path>` checks manifest shape and staleness after a refresh.

@@ -130,18 +130,21 @@ Resolution order — use the first available (the shipped UNCONFIGURED starter c
 continue down the list):
 
 1. **A path the user names.** Always wins.
-2. **`references/tenant-manifest.json` inside this skill.** Readable on both surfaces; writable
-   only in Claude Code, where the skill lives in an editable repo and manifest changes show up
-   in diffs. A refresh written here on claude.ai never reaches the uploaded skill — use option
-   1 or 3 there.
+2. **`references/tenant-manifest.json` inside this skill.** Readable everywhere; durable only
+   on a manual Claude Code install (a git clone or a copy in `.claude/skills/`), where the skill
+   is an editable repo and manifest changes show up in diffs. On a plugin-marketplace install
+   the skill sits in Claude Code's plugin cache and a plugin update replaces it — treat that
+   copy as read-only and use option 1 or 3. A refresh written here on claude.ai never reaches
+   the uploaded skill either — same fallback.
 3. **A connected document/memory store MCP server**, under a stable title such as
    `rewst-tenant-manifest`. Best cross-surface option: one refresh in Claude Code serves
    claude.ai sessions too.
 4. **A local working file in Claude Code.** Fast, but a scratch cache — offer to promote it to
    option 2 or 3.
 
-**Claude Code** — files persist; if the skill lives in a repo, manifest changes show up in diffs,
-which is a feature.
+**Claude Code** — files persist between sessions. On a manual git install, manifest changes show
+up in diffs, which is a feature. On a plugin install the skill directory belongs to the plugin
+cache and is replaced on update — persistence there means option 1 or 3.
 
 **claude.ai** — the sandbox filesystem resets between sessions. A file written to `/home/claude`
 is gone next time; never tell the user a manifest is cached when it's sitting in a sandbox about

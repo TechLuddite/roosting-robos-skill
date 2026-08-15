@@ -68,6 +68,11 @@ the uploader refuses the extension, rename it to `rewst.zip` — same bytes.
 
 ## First-run setup
 
+> **Plugin installs:** a plugin update replaces the skill directory, taking in-tree edits with
+> it. Keep your live `house-style.md` and tenant manifest outside the plugin — a path you name,
+> or a connected doc store (see `references/manifest.md`, "Where the manifest lives"). Editing
+> the files in place is only durable on a manual install.
+
 1. **Claim `house-style.md`.** Search it for `[SET THIS]` markers — your MSP's naming prefix,
    org-variable casing, notification targets, tag taxonomy. Until set, sessions drive toward
    the documented defaults.
@@ -113,11 +118,16 @@ this file is designed to be committed.
 secrets, but it does hold your customer org names and IDs, integration IDs, PSA board/queue/status
 IDs, and org variable names — a readable map of your client base and how it's wired. A filled-in
 `house-style.md` adds your naming prefix and notification targets. If you fork this repo, keep the
-fork private, or add these two paths to `.gitignore` before your first refresh:
+fork private. Adding the paths to `.gitignore` is **not** enough on its own — both files are
+already tracked, and Git ignores `.gitignore` for tracked files, so the next `git add .` after a
+refresh commits the populated manifest anyway. If the fork must be public, untrack them first:
 
-```
-skills/rewst/references/tenant-manifest.json
-skills/rewst/references/house-style.md
+```bash
+git rm --cached skills/rewst/references/tenant-manifest.json \
+                skills/rewst/references/house-style.md
+printf '%s\n' skills/rewst/references/tenant-manifest.json \
+              skills/rewst/references/house-style.md >> .gitignore
+git commit -m "Keep tenant manifest and house style out of the public fork"
 ```
 
 Upstream ships them at their empty/default state on purpose, so they're tracked here.
@@ -125,8 +135,11 @@ Upstream ships them at their empty/default state on purpose, so they're tracked 
 ## Building the package
 
 The `.skill` is **not committed** — it's a zip of `skills/rewst/`, and a committed copy drifts
-from the source it duplicates. CI builds it on every push and attaches it to the GitHub Release
-when a `v*` tag is pushed, so the published artifact always comes from a clean checkout.
+from the source it duplicates. CI builds it on every push, leak-checks the manifest, smoke-tests
+the archive, and on a `v*` tag attaches that same verified artifact to the GitHub Release, so
+the published bytes always come from a clean checkout. The build is reproducible: packaging the
+same source twice yields byte-identical archives, so release checksums only change when content
+does.
 
 To build one locally:
 
@@ -139,8 +152,15 @@ disagree, which is the most common upload rejection. It skips dotfiles, `__pycac
 `node_modules`, but it cannot tell your populated `tenant-manifest.json` from the starter — it
 packages whatever is on disk. **Build from a clean checkout before sharing a `.skill`.**
 
-To cut a release: `git tag v0.1.0 && git push --tags`. The workflow creates the release if it
-doesn't exist and attaches `rewst.skill` to it.
+To cut a release: bump `version` in `.claude-plugin/plugin.json` — marketplace-installed plugins
+only see updates when that value changes — commit, then `git tag v0.1.0 && git push --tags`. The
+workflow refuses a tag that doesn't match `plugin.json`, creates the release if it doesn't
+exist, and attaches the exact `rewst.skill` bytes the build job checked. Publishing a release
+from the GitHub UI on an existing `v*` tag attaches the asset too.
+
+Until a `v*` tag is pushed there is **no release at all** — pushes to `main` only produce the
+workflow artifact on the Actions run page, and CI prints a notice when `plugin.json`'s version
+has no matching tag.
 
 ## License
 

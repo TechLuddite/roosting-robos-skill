@@ -5,9 +5,10 @@ procedure; this describes your team, and no one else can write it. The defaults 
 on Rewst's own naming — overwrite them freely.
 
 Three rules: (1) where this file contradicts anything else in the skill, this file wins — only
-`guardrails.md` outranks it; (2) carry this file forward across skill updates, never clobber it;
-(3) anything marked `[SET THIS]` is an unmade decision, and until it's made the skill drives
-consistency toward a guess.
+`references/guardrails.md` outranks it; (2) carry this file forward across skill updates, never
+clobber it — on a plugin-marketplace install that means keeping your live copy outside the
+plugin directory, because updates replace it; (3) anything marked `[SET THIS]` is an unmade
+decision, and until it's made the skill drives consistency toward a guess.
 
 ---
 
@@ -89,7 +90,7 @@ tenant has a few hundred workflows.
 - Keep it short, and prefer explicit filters over clever comprehensions — the next person
   debugging it at 2am is the audience.
 - The traps themselves (undefined propagation, empty results, type coercion) live in
-  `jinja-gotchas.md`; treat that file, not memory, as the checklist.
+  `references/jinja-gotchas.md`; treat that file, not memory, as the checklist.
 
 ## PowerShell
 
