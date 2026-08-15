@@ -1,7 +1,8 @@
 # Jinja gotchas
 
-Traps only. For filter reference and syntax, fetch the docs — see `doc-map.md` under Jinja. This
-file exists because the docs tell you what works and these are the things that quietly don't.
+Traps only. For filter reference and syntax, fetch the docs — see `references/doc-map.md` under
+Jinja. This file exists because the docs tell you what works and these are the things that
+quietly don't.
 The traps below are core Jinja2 engine semantics (verified 2026-08), not rebuild-sensitive
 platform surface.
 

@@ -1,12 +1,10 @@
 {
   "name": "techluddite-skills",
+  "description": "TechLuddite community skills",
+  "version": "0.1.0",
   "owner": {
     "name": "TechLuddite",
     "url": "https://github.com/TechLuddite"
-  },
-  "metadata": {
-    "description": "TechLuddite community skills",
-    "version": "0.1.0"
   },
   "plugins": [
     {
