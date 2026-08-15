@@ -79,9 +79,11 @@ the uploader refuses the extension, rename it to `rewst.zip` — same bytes.
 2. **Build the tenant manifest.** Ask Claude to run the refresh procedure in
    `references/manifest.md`. It sweeps breadth-first (orgs → integrations → org variable
    *names*), stamps every entry, and never stores variable values or secrets.
-3. **Validate:** `python skills/rewst/scripts/validate_manifest.py skills/rewst/references/tenant-manifest.json`
-   (exit 0 clean / 1 warnings / 2 errors). The shipped starter reports an error until it's
-   populated — that's the `UNCONFIGURED` guard, not a broken validator.
+3. **Validate:** `python skills/rewst/scripts/validate_manifest.py <path-to-your-live-manifest>`
+   (exit 0 clean / 1 warnings / 2 errors). On a manual install where the manifest lives
+   in-tree, that path is `skills/rewst/references/tenant-manifest.json`. The shipped starter
+   reports an error until it's populated — that's the `UNCONFIGURED` guard, not a broken
+   validator.
 
 ## Recommended org instructions
 
@@ -111,8 +113,18 @@ stop a write. Real enforcement is the scope of the MCP token and the RBAC attach
 routine build work is running on a token that can write to every customer org, fix the token.
 
 The manifest never stores org-variable *values*, credentials, or customer PII — names, types,
-and IDs only — and the validator hard-errors on value fields and secret-shaped strings, because
-this file is designed to be committed.
+and IDs only. The validator backstops part of that: it hard-errors on value/default fields at
+any depth and on strings shaped like known credentials (JWTs, vendor key prefixes, AWS keys,
+PEM blocks, URL-embedded passwords, `key=value` assignments, webhook URLs, long hex tokens).
+It cannot recognize an arbitrary password or PII — those exclusions are procedural, kept by the
+refresh rules, not by code. The file is designed to be committed; the validator narrows, but
+does not close, the ways that can go wrong.
+
+**Install channels have different trust models.** The release asset is the verified path: CI
+leak-checks, smoke-tests, and checksums the exact bytes it attaches (a `.sha256` ships next to
+the asset). The plugin marketplace ships whatever the repo's default branch holds when a
+version bump lands — none of the release gates apply at install or update time. For
+high-assurance use, install the release asset, or fork and pin.
 
 **"Designed to be committed" means *your* repo, not a public one.** A populated manifest holds no
 secrets, but it does hold your customer org names and IDs, integration IDs, PSA board/queue/status
@@ -127,19 +139,27 @@ git rm --cached skills/rewst/references/tenant-manifest.json \
                 skills/rewst/references/house-style.md
 printf '%s\n' skills/rewst/references/tenant-manifest.json \
               skills/rewst/references/house-style.md >> .gitignore
+git add .gitignore
 git commit -m "Keep tenant manifest and house style out of the public fork"
 ```
+
+This protects the future, not the past: if a populated version was **ever committed**, the
+fork's history still contains it — rewrite history with `git filter-repo` (or start the public
+fork from a fresh clone of upstream) before publishing. Watch for stray copies too
+(`tenant-manifest.backup.json`, editor `.bak` files); the recipe only untracks the two exact
+paths.
 
 Upstream ships them at their empty/default state on purpose, so they're tracked here.
 
 ## Building the package
 
 The `.skill` is **not committed** — it's a zip of `skills/rewst/`, and a committed copy drifts
-from the source it duplicates. CI builds it on every push, leak-checks the manifest, smoke-tests
-the archive, and on a `v*` tag attaches that same verified artifact to the GitHub Release, so
-the published bytes always come from a clean checkout. The build is reproducible: packaging the
-same source twice yields byte-identical archives, so release checksums only change when content
-does.
+from the source it duplicates. CI builds it on every PR and push to `main`, leak-checks the
+manifest, smoke-tests the archive, and on a `v*` tag attaches that same verified artifact to
+the GitHub Release along with its `.sha256`, so the published bytes always come from a clean
+checkout and downloads can be verified. The build is reproducible: packaging the same source
+twice yields byte-identical archives (timestamps, modes, entry order, compression level, and
+zip metadata are all pinned), so release checksums only change when content does.
 
 To build one locally:
 
@@ -149,18 +169,20 @@ python scripts/package.py skills/rewst dist
 
 The packager refuses to build if the folder name and the `name:` in `SKILL.md` frontmatter
 disagree, which is the most common upload rejection. It skips dotfiles, `__pycache__`, and
-`node_modules`, but it cannot tell your populated `tenant-manifest.json` from the starter — it
-packages whatever is on disk. **Build from a clean checkout before sharing a `.skill`.**
+`node_modules`, and it refuses to package a populated `tenant-manifest.json` unless you pass
+`--allow-populated` — but it can't inspect everything you may have edited (a filled-in
+`house-style.md` ships as-is). **Build from a clean checkout before sharing a `.skill`.**
 
 To cut a release: bump `version` in `.claude-plugin/plugin.json` — marketplace-installed plugins
-only see updates when that value changes — commit, then `git tag v0.1.0 && git push --tags`. The
-workflow refuses a tag that doesn't match `plugin.json`, creates the release if it doesn't
-exist, and attaches the exact `rewst.skill` bytes the build job checked. Publishing a release
-from the GitHub UI on an existing `v*` tag attaches the asset too.
+only see updates when that value changes — commit, then `git tag v<version> && git push origin
+v<version>` (the tag must match the bumped `plugin.json` exactly). The workflow refuses a tag
+that doesn't match `plugin.json`, creates the release if it doesn't exist, and attaches the
+exact `rewst.skill` bytes the build job checked, verified against the build job's checksum.
+Publishing a release from the GitHub UI on an existing `v*` tag attaches the asset too.
 
-Until a `v*` tag is pushed there is **no release at all** — pushes to `main` only produce the
-workflow artifact on the Actions run page, and CI prints a notice when `plugin.json`'s version
-has no matching tag.
+A `v*` tag is what ships bytes: without one for the current version, pushes to `main` only
+produce the workflow artifact on the Actions run page, and CI prints a notice when
+`plugin.json`'s version has no matching tag.
 
 ## License
 

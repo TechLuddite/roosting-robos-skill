@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Validate a Rewst tenant manifest: shape, staleness, and accidental secrets.
 
-Usage:
-    python validate_manifest.py references/tenant-manifest.json
-    python validate_manifest.py references/tenant-manifest.json --ttl 7
-    python validate_manifest.py references/tenant-manifest.json --allow-unconfigured
+Usage (from the skill root, skills/rewst/):
+    python scripts/validate_manifest.py references/tenant-manifest.json
+    python scripts/validate_manifest.py references/tenant-manifest.json --ttl 7
+    python scripts/validate_manifest.py references/tenant-manifest.json --allow-unconfigured
 
 Exit codes: 0 = clean, 1 = warnings, 2 = errors (including validator crashes).
 --allow-unconfigured downgrades the shipped UNCONFIGURED starter's error to a
@@ -24,13 +24,19 @@ GENERATION_VALUES = {"legacy", "new", "mixed", "unknown"}
 # Keys that should never hold a value in a manifest. Names and types are fine;
 # values are not, because this file gets committed and uploaded.
 SECRET_KEY_PATTERN = re.compile(
-    r"(secret|password|passwd|api_?key|token|credential|client_?secret|bearer|private_?key)",
+    r"(secret|password|passwd|pwd|api_?key|access_?key|token|credential"
+    r"|client_?secret|bearer|private_?key|auth(orization|entication)?(?![a-z])"
+    r"|conn(ection)?[-_]?str(ing)?|dsn(?![a-z]))",
     re.I,
 )
 
-# String values that look like credentials regardless of what key they sit under.
-# Kept to well-known prefixes on purpose: generic entropy checks would flag the
-# UUIDs a manifest is made of.
+# String values that look like credentials regardless of what key they sit
+# under, searched anywhere inside the value — a JWT pasted as "Bearer eyJ…"
+# must not pass because of its prefix. Patterns stay specific (known prefixes,
+# URL userinfo, key=value assignments, webhook URLs, 40+ contiguous hex — a
+# dashed UUID never exceeds 12) because generic entropy checks would flag the
+# UUIDs a manifest is made of; unmarked base64 blobs remain out of scope for
+# the same reason.
 _SECRET_VALUE = (
     r"(eyJ[A-Za-z0-9_-]{10,}"           # JWT
     r"|sk-[A-Za-z0-9_-]{8,}"            # sk- API keys
@@ -38,16 +44,21 @@ _SECRET_VALUE = (
     r"|github_pat_[A-Za-z0-9_]{8,}"
     r"|xox[baprs]-"                     # Slack tokens
     r"|AKIA[0-9A-Z]{16}"                # AWS access key id
-    r"|-----BEGIN\s)"                   # PEM material
+    r"|-----BEGIN\s"                    # PEM material
+    r"|://[^/\s@:]+:[^/\s@]+@"          # URL userinfo credentials (scheme://user:pass@)
+    r"|(?i:\b(password|passwd|pwd|secret|api_?key|token)\s*=\s*[^\s;,&\"']{2,})"
+    r"|hooks\.slack\.com/services/"     # capability-bearing webhook URLs
+    r"|webhook\.office\.com/"
+    r"|outlook\.office\.com/webhook"
+    r"|discord(app)?\.com/api/webhooks/"
+    r"|\b[0-9a-fA-F]{40,}\b)"           # long contiguous hex token
 )
-SECRET_VALUE_PATTERN = re.compile(r"^" + _SECRET_VALUE)
-# For scanning raw text when the manifest won't parse: the secret check must
-# not be skippable by a syntax error.
 SECRET_VALUE_ANYWHERE = re.compile(_SECRET_VALUE)
 
-# Keys that must not exist at all inside org_variables entries: the schema
-# stores names and types, never values or defaults.
-FORBIDDEN_ORG_VAR_KEYS = ("value", "default")
+# Keys that must not exist anywhere in a manifest: the schema stores names
+# and types, never values or defaults, so a value-like key at any depth is
+# the canonical leak this validator exists to catch.
+FORBIDDEN_VALUE_KEYS = ("value", "values", "default", "defaults")
 
 COLLECTIONS_WITH_STAMPS = [
     "orgs",
@@ -61,8 +72,11 @@ COLLECTIONS_WITH_STAMPS = [
 def parse_ts(value):
     if not isinstance(value, str):
         return None
+    # Truncate 7+-digit fractional seconds (.NET/PowerShell `-Format o` emits
+    # them) so parsing behaves the same on every supported Python version.
+    value = re.sub(r"\.(\d{6})\d+", r".\1", value.replace("Z", "+00:00"))
     try:
-        ts = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        ts = datetime.fromisoformat(value)
     except ValueError:
         return None
     # A stamp without an offset is assumed UTC rather than crashing the
@@ -95,17 +109,42 @@ def walk_for_secrets(node, path, findings):
             here = f"{path}.{key}" if path else key
             # bool is excluded: an `is_secret: true` flag is names-and-types
             # metadata, not a leaked value.
-            if (SECRET_KEY_PATTERN.search(key) and isinstance(val, (str, int, float))
-                    and not isinstance(val, bool) and str(val).strip()):
-                findings.append(here)
-            elif isinstance(val, str) and SECRET_VALUE_PATTERN.match(val.strip()):
+            if SECRET_KEY_PATTERN.search(key) and not isinstance(val, bool):
+                if isinstance(val, str) and val.strip():
+                    findings.append(here)
+                elif (isinstance(val, (int, float))
+                        and len(re.sub(r"\D", "", str(val))) >= 6):
+                    # Small numbers under secret-ish names are metadata
+                    # (token_count: 512); six or more digits is
+                    # credential-shaped.
+                    findings.append(here)
+                elif isinstance(val, (dict, list)) and val:
+                    # A populated container under a secret-named key
+                    # ("passwords": [...]) has no place in a names-and-types
+                    # manifest, whatever its leaves look like.
+                    findings.append(here)
+            if (isinstance(val, str) and SECRET_VALUE_ANYWHERE.search(val)
+                    and here not in findings):
                 findings.append(here)
             walk_for_secrets(val, here, findings)
     elif isinstance(node, list):
         for i, item in enumerate(node):
-            if isinstance(item, str) and SECRET_VALUE_PATTERN.match(item.strip()):
+            if isinstance(item, str) and SECRET_VALUE_ANYWHERE.search(item):
                 findings.append(f"{path}[{i}]")
             walk_for_secrets(item, f"{path}[{i}]", findings)
+
+
+def walk_for_forbidden_keys(node, path, hits):
+    """Find value/default-style keys at any depth — they never belong here."""
+    if isinstance(node, dict):
+        for key, val in node.items():
+            here = f"{path}.{key}" if path else key
+            if key in FORBIDDEN_VALUE_KEYS:
+                hits.append(here)
+            walk_for_forbidden_keys(val, here, hits)
+    elif isinstance(node, list):
+        for i, item in enumerate(node):
+            walk_for_forbidden_keys(item, f"{path}[{i}]", hits)
 
 
 def main():
@@ -150,19 +189,32 @@ def main():
         if key not in m:
             errors.append(f"missing required top-level key: {key}")
 
-    if m.get("tenant") == "UNCONFIGURED":
+    # tenant anchors both the UNCONFIGURED guard and the wrong-tenant binding
+    # check, so its shape is an error, not a nuance.
+    tenant = m.get("tenant")
+    if "tenant" in m and (not isinstance(tenant, str) or not tenant.strip()):
+        errors.append(
+            f"tenant must be a non-empty string (the owner org ID as reported "
+            f"by the server), got: {tenant!r}"
+        )
+    elif isinstance(tenant, str) and tenant.strip().upper() == "UNCONFIGURED":
         msg = ("tenant is UNCONFIGURED — this is the empty starter; run the refresh "
                "procedure in references/manifest.md before relying on it")
         (warnings if args.allow_unconfigured else errors).append(msg)
 
     gen_value = m.get("platform_generation")
-    if gen_value is not None and gen_value not in GENERATION_VALUES:
+    if gen_value is not None and (
+            not isinstance(gen_value, str) or gen_value not in GENERATION_VALUES):
         warnings.append(
-            f"platform_generation '{gen_value}' is not one of {sorted(GENERATION_VALUES)}"
+            f"platform_generation {gen_value!r} is not one of {sorted(GENERATION_VALUES)}"
         )
 
     now = datetime.now(timezone.utc)
     ttl = args.ttl if args.ttl is not None else m.get("ttl_days", 14)
+    if isinstance(ttl, bool):
+        # int(True) is 1 — a shape mistake must not silently become a 1-day TTL.
+        errors.append(f"ttl_days is not a number: {ttl!r}")
+        ttl = 14
     try:
         ttl = int(ttl)
     except (TypeError, ValueError):
@@ -172,6 +224,9 @@ def main():
     gen = parse_ts(m.get("generated_at", ""))
     if m.get("generated_at") and gen is None:
         errors.append("generated_at is not a valid ISO-8601 timestamp")
+    elif gen is not None and age_days(gen, now) < -1:
+        warnings.append("generated_at is in the future — check the clock or "
+                        "timezone that wrote it")
 
     if not m.get("mcp_tools"):
         warnings.append(
@@ -179,7 +234,7 @@ def main():
             "(every session still re-enumerates before its first live call)"
         )
 
-    stale, unstamped, total = [], [], 0
+    stale, unstamped, future, total = [], [], [], 0
     for coll in COLLECTIONS_WITH_STAMPS:
         items = m.get(coll, [])
         if not isinstance(items, list):
@@ -194,23 +249,23 @@ def main():
             label = item.get("name") or item.get("id") or f"{coll}[{i}]"
             if ts is None:
                 unstamped.append(f"{coll}: {label}")
+            elif age_days(ts, now) < -1:
+                # A future stamp can never go stale, which silently disables
+                # the one check that guards against acting on outdated IDs.
+                future.append(f"{coll}: {label}")
             elif age_days(ts, now) > ttl:
                 stale.append(f"{coll}: {label} ({age_days(ts, now):.0f}d)")
 
-    # org_variables must hold names and types only — a literal value/default
-    # field is the canonical secret leak this validator exists to catch.
-    org_vars = m.get("org_variables", [])
-    if isinstance(org_vars, list):
-        for i, item in enumerate(org_vars):
-            if not isinstance(item, dict):
-                continue
-            for bad in FORBIDDEN_ORG_VAR_KEYS:
-                if bad in item:
-                    label = item.get("name") or f"org_variables[{i}]"
-                    errors.append(
-                        f"org_variables entry '{label}' carries a '{bad}' field — "
-                        "manifests hold names and types, never values"
-                    )
+    # Value/default-style keys never belong in a manifest at any depth — the
+    # schema stores names and types only, and this is the canonical secret
+    # leak the validator exists to catch.
+    forbidden = []
+    walk_for_forbidden_keys(m, "", forbidden)
+    for hit in forbidden:
+        errors.append(
+            f"value-like field at {hit} — manifests hold names and types, "
+            "never values or defaults"
+        )
 
     # psa_lookups is keyed by org id rather than being a list
     psa = m.get("psa_lookups", {})
@@ -225,6 +280,8 @@ def main():
             ts = parse_ts(block.get("captured_at", ""))
             if ts is None:
                 unstamped.append(f"psa_lookups: {org_id}")
+            elif age_days(ts, now) < -1:
+                future.append(f"psa_lookups: {org_id}")
             elif age_days(ts, now) > ttl:
                 stale.append(f"psa_lookups: {org_id} ({age_days(ts, now):.0f}d)")
 
@@ -242,6 +299,9 @@ def main():
 
     if unstamped:
         warnings.append(f"{len(unstamped)} entries missing captured_at")
+    if future:
+        warnings.append(f"{len(future)} entries stamped in the future — a wrong "
+                        "clock or timezone disables staleness checks; fix the stamps")
     if stale:
         warnings.append(f"{len(stale)} entries older than {ttl}d — treat as hints, verify before writing")
 

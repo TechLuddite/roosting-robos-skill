@@ -1,7 +1,7 @@
 {
   "name": "roosting-robos",
   "displayName": "Roosting Robos",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Build, debug, and review Rewst MSP automations over the Rewst MCP server, with multi-tenant write guardrails and a cached tenant manifest",
   "author": {
     "name": "TechLuddite",
