@@ -106,11 +106,17 @@ Python. Don't look for a refresh script; there isn't one and there can't be.
 2. **Sweep breadth-first, not depth-first.** Orgs, then integrations, then org variable names.
    Stop there for a first pass. PSA lookups are per-org and expensive — pull them only for orgs
    the user actually works in, and ask which those are rather than fetching all of them.
-   Re-verify `role` labels (owner/customer/test) whenever a refresh touches orgs.
+   Re-verify `role` labels (owner/customer/test) whenever a refresh touches orgs. Role labels
+   are drafting hints only — owner-ness is determined live at write time, against the
+   server-reported owner org, never from this file.
 3. **Compact as you go.** Store IDs, names, and types. Drop descriptions, timestamps you don't
    need, nested metadata, and anything you'd never reference. A manifest that reproduces the API
    response verbatim defeats its own purpose.
-4. **Strip values.** Org variable names and types, never values.
+4. **Strip values.** Org variable names and types, never values. Prefer name-only listing
+   tools when the server offers them — values returned by a broad listing land in the session
+   context (and in conversation history) even if they never reach the manifest. If a secret
+   value does come back in a tool result, don't repeat or summarize it, tell the user it
+   transited the session, and suggest rotating it if it's sensitive.
 5. **Stamp** each entry with `captured_at`, and set the top-level fields: `tenant` (the owner
    org ID as reported by the server — the identifier the first-use binding check compares),
    `region`, `platform_generation`, and a fresh `generated_at`.
@@ -138,13 +144,18 @@ continue down the list):
    the uploaded skill either — same fallback.
 3. **A connected document/memory store MCP server**, under a stable title such as
    `rewst-tenant-manifest`. Best cross-surface option: one refresh in Claude Code serves
-   claude.ai sessions too.
+   claude.ai sessions too. Use a store whose entire readership you'd trust with your client
+   list — a populated manifest is a readable map of your client base, and some stores are
+   org-wide-readable by design; check the sharing scope before writing.
 4. **A local working file in Claude Code.** Fast, but a scratch cache — offer to promote it to
    option 2 or 3.
 
 **Claude Code** — files persist between sessions. On a manual git install, manifest changes show
 up in diffs, which is a feature. On a plugin install the skill directory belongs to the plugin
-cache and is replaced on update — persistence there means option 1 or 3.
+cache and is replaced on update — persistence there means option 1 or 3. A manual install
+inside a project's `.claude/skills/` puts the populated manifest in that project's repo: before
+letting it in, confirm the repo's visibility and audience, and prefer `~/.claude/skills/` when
+project repos are shared or public.
 
 **claude.ai** — the sandbox filesystem resets between sessions. A file written to `/home/claude`
 is gone next time; never tell the user a manifest is cached when it's sitting in a sandbox about

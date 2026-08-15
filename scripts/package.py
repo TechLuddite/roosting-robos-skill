@@ -2,16 +2,21 @@
 """Package a skill folder into a distributable .skill file (a zip).
 
 Usage:
-    python scripts/package.py skills/rewst [output-dir]
+    python scripts/package.py skills/rewst [output-dir] [--allow-populated]
 
 Build tooling, not part of the skill. The output is not committed — CI builds it
 on a tag and attaches it to the GitHub Release, so the artifact always comes from
 a clean checkout rather than from someone's working tree.
 
+Refuses to package a populated tenant manifest (tenant != UNCONFIGURED) unless
+--allow-populated is passed: a local build is the one path CI's leak check never
+sees, and a populated manifest maps a real client base.
+
 Exit codes: 0 = packaged, 1 = validation failed.
 """
 
 import fnmatch
+import json
 import re
 import sys
 import zipfile
@@ -33,12 +38,15 @@ NAME_SHAPE = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
 ZIP_DATE = (1980, 1, 1, 0, 0, 0)
 
 
-def should_exclude(rel_path):
+def should_exclude(rel_path, root):
     parts = rel_path.parts
     if any(part in EXCLUDE_DIRS or part.startswith(".") for part in parts):
         return True
-    # parts[0] is the skill folder name; parts[1] is its first subdirectory.
-    if len(parts) > 1 and parts[1] in ROOT_EXCLUDE_DIRS:
+    # parts[0] is the skill folder name; parts[1] is its first child. The
+    # root exclusion is for directories only — a regular file that happens to
+    # share the name is content, not tooling, and must not vanish silently.
+    if (len(parts) > 1 and parts[1] in ROOT_EXCLUDE_DIRS
+            and (root / parts[0] / parts[1]).is_dir()):
         return True
     if rel_path.name in EXCLUDE_FILES:
         return True
@@ -46,19 +54,30 @@ def should_exclude(rel_path):
 
 
 def frontmatter_fields(skill_md):
-    """Read `name:` and `description:` out of the SKILL.md YAML frontmatter."""
-    text = skill_md.read_text(encoding="utf-8")
+    """Read `name:` and `description:` out of the SKILL.md YAML frontmatter.
+
+    Returns (fields, duplicate_keys). A duplicated key is a hard error for the
+    caller: YAML consumers disagree on which occurrence of a duplicate wins,
+    so a second `name:` could ship an archive whose effective name was never
+    validated.
+    """
+    # utf-8-sig: a BOM would otherwise hide the leading "---" and produce a
+    # misleading "no frontmatter" error on a file that visibly starts with it.
+    text = skill_md.read_text(encoding="utf-8-sig")
     if not text.startswith("---"):
-        return None
+        return None, []
     end = text.find("\n---", 3)
     if end == -1:
-        return None
+        return None, []
     fields = {}
+    duplicates = []
     for key in ("name", "description"):
-        match = re.search(rf"^{key}:\s*(.+?)\s*$", text[3:end], re.M)
-        if not match:
+        matches = re.findall(rf"^{key}:\s*(.+?)\s*$", text[3:end], re.M)
+        if not matches:
             continue
-        val = match.group(1)
+        if len(matches) > 1:
+            duplicates.append(key)
+        val = matches[0]
         # A quoted scalar keeps everything inside the quotes; a plain scalar
         # drops any trailing YAML comment.
         if val[0] in "'\"" and val.find(val[0], 1) != -1:
@@ -66,7 +85,7 @@ def frontmatter_fields(skill_md):
         else:
             val = val.split(" #")[0].strip()
         fields[key] = val
-    return fields
+    return fields, duplicates
 
 
 def collect(skill_path):
@@ -77,7 +96,7 @@ def collect(skill_path):
         if path.is_symlink() or not path.is_file():
             continue
         rel = path.relative_to(root)
-        if should_exclude(rel):
+        if should_exclude(rel, root):
             continue
         out.append((path, rel))
     return out
@@ -105,10 +124,15 @@ def validate(skill_path, packed):
                 f"symlink not allowed in a skill: {path.relative_to(skill_path)}"
             )
 
-    fields = frontmatter_fields(skill_md)
+    fields, duplicates = frontmatter_fields(skill_md)
     if fields is None:
         errors.append("SKILL.md has no YAML frontmatter block")
         return errors
+    for key in duplicates:
+        errors.append(
+            f"SKILL.md frontmatter has more than one `{key}:` line — YAML "
+            "consumers disagree on which wins; keep exactly one"
+        )
 
     name = fields.get("name")
     if name is None:
@@ -135,7 +159,7 @@ def validate(skill_path, packed):
 
     # SKILL.md routes by literal path; a renamed or excluded file would ship
     # instructions pointing at files the archive doesn't carry.
-    text = skill_md.read_text(encoding="utf-8")
+    text = skill_md.read_text(encoding="utf-8-sig")
     for ref in sorted(set(re.findall(r"`((?:references|scripts)/[A-Za-z0-9._/-]+)`", text))):
         if ref not in packed:
             errors.append(f"SKILL.md references `{ref}` but it is not in the package")
@@ -144,12 +168,14 @@ def validate(skill_path, packed):
 
 
 def main():
-    if len(sys.argv) < 2:
+    flags = {a for a in sys.argv[1:] if a.startswith("--")}
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if not args:
         print(__doc__)
         return 1
 
-    skill_path = Path(sys.argv[1]).resolve()
-    out_dir = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else Path.cwd()
+    skill_path = Path(args[0]).resolve()
+    out_dir = Path(args[1]).resolve() if len(args) > 1 else Path.cwd()
 
     files = collect(skill_path) if skill_path.is_dir() else []
     packed = {rel.as_posix().split("/", 1)[1] for _, rel in files}
@@ -159,14 +185,38 @@ def main():
             print(f"ERROR: {err}")
         return 1
 
+    # A populated manifest maps a real client base, and a local build is the
+    # one path CI's leak check never sees — refuse unless the builder insists.
+    manifest = skill_path / "references" / "tenant-manifest.json"
+    if manifest.exists() and "--allow-populated" not in flags:
+        try:
+            tenant = json.loads(
+                manifest.read_text(encoding="utf-8-sig")).get("tenant")
+        except (OSError, ValueError):
+            tenant = None
+        if not (isinstance(tenant, str)
+                and tenant.strip().upper() == "UNCONFIGURED"):
+            print("ERROR: references/tenant-manifest.json is populated (tenant "
+                  "is not UNCONFIGURED) — a built .skill would carry your "
+                  "tenant map. Build from a clean checkout, or pass "
+                  "--allow-populated if you really mean to ship it.")
+            return 1
+
     out_dir.mkdir(parents=True, exist_ok=True)
     target = out_dir / f"{skill_path.name}.skill"
+    if target.exists():
+        print(f"overwriting {target}")
 
     # Paths inside the archive are relative to the skill's parent, so the skill
     # folder itself is the archive root — which is what an upload expects.
-    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zf:
+    # compresslevel is pinned because the reproducibility promise depends on
+    # it: zlib's default level is a toolchain detail, not a constant.
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
         for path, rel in files:
             info = zipfile.ZipInfo(rel.as_posix(), date_time=ZIP_DATE)
+            # create_system varies by OS (0 on Windows, 3 on Unix); pin it so
+            # the same source zips to the same bytes on any platform.
+            info.create_system = 3
             # Git only tracks the executable bit, so normalize to 644/755
             # rather than inheriting the checkout's umask.
             mode = 0o755 if path.stat().st_mode & 0o100 else 0o644

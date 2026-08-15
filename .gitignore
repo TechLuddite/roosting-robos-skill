@@ -6,3 +6,10 @@ __pycache__/
 # Build output — the .skill is a release asset, not a tracked file
 dist/
 *.skill
+
+# OS junk and stray backups — a copied/backed-up manifest must not sneak in
+.DS_Store
+Thumbs.db
+.env
+*.bak
+*.old

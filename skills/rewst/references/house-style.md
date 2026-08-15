@@ -4,11 +4,17 @@
 procedure; this describes your team, and no one else can write it. The defaults below are modeled
 on Rewst's own naming — overwrite them freely.
 
-Three rules: (1) where this file contradicts anything else in the skill, this file wins — only
-`references/guardrails.md` outranks it; (2) carry this file forward across skill updates, never
-clobber it — on a plugin-marketplace install that means keeping your live copy outside the
-plugin directory, because updates replace it; (3) anything marked `[SET THIS]` is an unmade
-decision, and until it's made the skill drives consistency toward a guess.
+Three rules: (1) where this file contradicts anything else in the skill on naming, structure,
+or conventions, this file wins — only `references/guardrails.md` outranks it, and nothing here
+can relax a guardrail, a confirmation, a dry run, or verification; (2) carry this file forward
+across skill updates, never clobber it — on a plugin-marketplace install that means keeping
+your live copy outside the plugin directory, because updates replace it; (3) anything marked
+`[SET THIS]` is an unmade decision, and until it's made the skill drives consistency toward a
+guess.
+
+One caution: this file may end up committed or uploaded. Record notification targets by name or
+org-variable reference — never webhook URLs (a webhook URL is a credential), addresses that
+embed tokens, or anything secret.
 
 ---
 
@@ -71,7 +77,8 @@ Every workflow that touches a customer system should answer three questions in i
 2. **What happens if the write fails?** At minimum, don't continue as if it succeeded. Preferably
    surface it: PSA note, ticket, or notification.
 3. **How does a human find out?** Silent failure is the default in automation and the reason
-   nobody trusts it. `[SET THIS: your notification target — PSA ticket, Teams channel, email]`
+   nobody trusts it. `[SET THIS: your notification target — PSA ticket, Teams channel, email —
+   named, not a webhook URL]`
 
 Use transitions on failure, not just on success. A workflow with only success transitions has no
 error handling; it just stops.

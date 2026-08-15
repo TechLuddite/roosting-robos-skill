@@ -50,7 +50,8 @@ customer. Build a dict and let the platform serialize it, or use `| tojson`.
 ## Loop scope
 
 Variables set inside a `{% for %}` don't survive it. Accumulate with a namespace or use a filter
-that does the aggregation directly. See the block scope doc if you need the mechanics.
+that does the aggregation directly. For the mechanics, fetch the Loops page from
+`references/doc-map.md` (Jinja → Loops) and `?ask=` about block scope.
 
 ## Reserved keywords
 
