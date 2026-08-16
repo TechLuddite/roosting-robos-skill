@@ -4,17 +4,20 @@
 procedure; this describes your team, and no one else can write it. The defaults below are modeled
 on Rewst's own naming — overwrite them freely.
 
-Three rules: (1) where this file contradicts anything else in the skill on naming, structure,
-or conventions, this file wins — only `references/guardrails.md` outranks it, and nothing here
-can relax a guardrail, a confirmation, a dry run, or verification; (2) carry this file forward
-across skill updates, never clobber it — on a plugin-marketplace install that means keeping
-your live copy outside the plugin directory, because updates replace it; (3) anything marked
-`[SET THIS]` is an unmade decision, and until it's made the skill drives consistency toward a
-guess.
+Three rules govern it:
+
+1. **This file wins on conventions.** Where it contradicts anything else in the skill on naming,
+   structure, or conventions, follow this file. Only `references/guardrails.md` outranks it, and
+   nothing here can relax a guardrail, a confirmation, a dry run, or verification.
+2. **Carry it forward across skill updates; never clobber it.** On a plugin-marketplace install
+   that means keeping your live copy outside the plugin directory, because updates replace the
+   whole directory.
+3. **`[SET THIS]` marks an unmade decision.** Until it's made, the skill drives consistency
+   toward a guess.
 
 One caution: this file may end up committed or uploaded. Record notification targets by name or
-org-variable reference — never webhook URLs (a webhook URL is a credential), addresses that
-embed tokens, or anything secret.
+org-variable reference — never webhook URLs (a webhook URL is a credential), addresses that embed
+tokens, or anything secret.
 
 ---
 
